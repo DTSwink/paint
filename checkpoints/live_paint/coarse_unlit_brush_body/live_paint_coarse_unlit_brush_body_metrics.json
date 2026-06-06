@@ -1,0 +1,57 @@
+{
+  "capture": "out\\proof\\split_capture.png",
+  "diagnostic": "out\\proof\\live_paint_coarse_unlit_brush_body_diagnostic.png",
+  "global": {
+    "foreground_pct": 25.465619261375227,
+    "mean_rgb_delta_0_255": 22.22699818900137,
+    "mean_hue_error_degrees": 11.74227523803711,
+    "mean_saturation_loss": 0.03676307201385498,
+    "mean_value_gain": 0.02391193062067032,
+    "mean_white_paint_drift": 0.0011383353266865015,
+    "mean_topology_mismatch": 0.2728183900420119,
+    "topology_sample_pct": 10.95674352173026
+  },
+  "worst_crops": [
+    {
+      "x": 280,
+      "y": 562,
+      "score": 0.22889475002991624,
+      "foreground_pct": 23.57421875,
+      "mean_rgb_delta_0_255": 33.197907731954224,
+      "mean_hue_error_degrees": 18.125995635986328,
+      "mean_saturation_loss": 0.07182160764932632,
+      "mean_value_gain": 0.03553779423236847,
+      "mean_white_paint_drift": 0.003172607161104679,
+      "mean_topology_mismatch": 0.28358618357197835,
+      "topology_sample_pct": 18.375
+    },
+    {
+      "x": 380,
+      "y": 482,
+      "score": 0.21040537873248447,
+      "foreground_pct": 28.84375,
+      "mean_rgb_delta_0_255": 29.577231239533482,
+      "mean_hue_error_degrees": 19.848520278930664,
+      "mean_saturation_loss": 0.04820771515369415,
+      "mean_value_gain": 0.04892241954803467,
+      "mean_white_paint_drift": 0.002620245097205043,
+      "mean_topology_mismatch": 0.33578576876069843,
+      "topology_sample_pct": 20.5703125
+    },
+    {
+      "x": 300,
+      "y": 442,
+      "score": 0.1985015073512387,
+      "foreground_pct": 63.73046875,
+      "mean_rgb_delta_0_255": 28.980715272464415,
+      "mean_hue_error_degrees": 17.846763610839844,
+      "mean_saturation_loss": 0.05278791859745979,
+      "mean_value_gain": 0.033395227044820786,
+      "mean_white_paint_drift": 0.001791203860193491,
+      "mean_topology_mismatch": 0.3027391947435141,
+      "topology_sample_pct": 42.98046875
+    }
+  ],
+  "verdict": "FAIL_COLOR_FOLLOW",
+  "failure_definition": "High hue drift, saturation loss, bright/desaturated white-paint drift, or topology mismatch means strokes are not following the underlying color/topology."
+}

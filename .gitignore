@@ -1,0 +1,11 @@
+build/
+out/build/
+out/
+!out/proof/
+*.user
+*.suo
+*.pdb
+*.ilk
+*.obj
+*.log
+.vs/
