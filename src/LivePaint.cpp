@@ -33,6 +33,38 @@ LivePaintCBData BuildLivePaintCB(const LivePaintParams& params, float time) {
     cb.enabled = params.enabled ? 1 : 0;
     cb.time = time;
     cb.previewExaggeration = params.previewExaggeration;
+    cb.flatBrushBody = params.flatBrushBody;
+    cb.flatOpacityBoost = params.flatOpacityBoost;
+    cb.flatColorFollow = params.flatColorFollow;
+    cb.flatLayerBlocking = params.flatLayerBlocking;
+    cb.flatAccumulation = params.flatAccumulation;
+    cb.flatStrokeLength = params.flatStrokeLength;
+    cb.flatStrokeWidth = params.flatStrokeWidth;
+    cb.flatPaintOpacity = params.flatPaintOpacity;
+    cb.kuwaharaRadius = params.kuwaharaRadius;
+    cb.kuwaharaStrength = params.kuwaharaStrength;
+    cb.kuwaharaSharpness = params.kuwaharaSharpness;
+    cb.kuwaharaHardness = params.kuwaharaHardness;
+    cb.kuwaharaEccentricity = params.kuwaharaEccentricity;
+    cb.kuwaharaAnisotropy = params.kuwaharaAnisotropy;
+    cb.noiseType = params.noiseType;
+    cb.noiseAmount = params.noiseAmount;
+    cb.noiseScale = params.noiseScale;
+    cb.noiseSeed = params.noiseSeed;
+    cb.noiseOctaves = params.noiseOctaves;
+    cb.noiseLacunarity = params.noiseLacunarity;
+    cb.noiseGain = params.noiseGain;
+    cb.noiseJitter = params.noiseJitter;
+    cb.noiseContrast = params.noiseContrast;
+    cb.noiseAngle = params.noiseAngle;
+    cb.noiseDirectionality = params.noiseDirectionality;
+    cb.skipInShaderBlur = params.skipInShaderBlur;
+    cb.blurViewportOriginX = 0.f;
+    cb.blurViewportOriginY = 0.f;
+    cb.blurPassDirection = 0;
+    cb.blurPassPad = 0.f;
+    cb.blurSourceTexelSizeX = 0.f;
+    cb.blurSourceTexelSizeY = 0.f;
     return cb;
 }
 

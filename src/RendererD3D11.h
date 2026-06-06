@@ -67,7 +67,8 @@ public:
         const LivePaintParams& livePaint,
         const LivePaintAssets& livePaintAssets,
         const GpuMesh& mesh,
-        ShaderCompiler& shaders);
+        ShaderCompiler& shaders,
+        bool applyModifierToRender);
 
     void Present();
 
@@ -82,6 +83,7 @@ public:
 
 private:
     bool CreateBackbufferResources(int width, int height);
+    bool EnsurePreviewTarget(int width, int height);
     void CreateSamplers();
     void CreateConstantBuffers();
 
@@ -102,6 +104,19 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Buffer> objectCB_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> materialCB_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> livePaintCB_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> previewColorTex_;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> previewColorRTV_;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> previewColorSRV_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> previewBlurTex_;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> previewBlurRTV_;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> previewBlurSRV_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> previewTempTex_;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> previewTempRTV_;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> previewTempSRV_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> previewDepthTex_;
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> previewDepthDSV_;
+    int previewWidth_ = 0;
+    int previewHeight_ = 0;
     GpuMesh fullscreenMesh_;
 
     HWND hwnd_ = nullptr;

@@ -8,6 +8,8 @@
 
 #include <vector>
 
+#include <cstring>
+
 
 
 namespace sv {
@@ -105,7 +107,11 @@ void ShaderCompiler::RefreshStamps() {
     psStamp_ = FileStamp(shaderRoot_ / L"material_ps.hlsl");
 
     modifierStamp_ = FileStamp(shaderRoot_ / L"normal_modifier.hlsl");
-    livePaintCommonStamp_ = FileStamp(shaderRoot_ / L"live_paint_common.hlsl");
+    modifierCommonStamp_ = FileStamp(shaderRoot_ / L"modifier_common.hlsl");
+    blurVsStamp_ = FileStamp(shaderRoot_ / L"normal_blur_vs.hlsl");
+    blurPsStamp_ = FileStamp(shaderRoot_ / L"normal_blur_ps.hlsl");
+    akfPsStamp_ = FileStamp(shaderRoot_ / L"normal_akf_ps.hlsl");
+    akfCommonStamp_ = FileStamp(shaderRoot_ / L"kuwahara_common.hlsl");
 
     stampsInitialized_ = true;
 
@@ -149,9 +155,28 @@ ShaderCompiler::ChangeMask ShaderCompiler::DetectChanges(bool forceAll) const {
 
     }
 
-    if (FileStamp(shaderRoot_ / L"live_paint_common.hlsl") != livePaintCommonStamp_) {
+    if (FileStamp(shaderRoot_ / L"modifier_common.hlsl") != modifierCommonStamp_) {
 
         changed = static_cast<ChangeMask>(static_cast<unsigned>(changed) | static_cast<unsigned>(ChangeMask::NormalModifier));
+
+    }
+
+    if (FileStamp(shaderRoot_ / L"normal_blur_vs.hlsl") != blurVsStamp_) {
+
+        changed = static_cast<ChangeMask>(static_cast<unsigned>(changed) | static_cast<unsigned>(ChangeMask::NormalBlur));
+
+    }
+
+    if (FileStamp(shaderRoot_ / L"normal_blur_ps.hlsl") != blurPsStamp_) {
+
+        changed = static_cast<ChangeMask>(static_cast<unsigned>(changed) | static_cast<unsigned>(ChangeMask::NormalBlur));
+
+    }
+
+    if (FileStamp(shaderRoot_ / L"normal_akf_ps.hlsl") != akfPsStamp_ ||
+        FileStamp(shaderRoot_ / L"kuwahara_common.hlsl") != akfCommonStamp_) {
+
+        changed = static_cast<ChangeMask>(static_cast<unsigned>(changed) | static_cast<unsigned>(ChangeMask::NormalAkf));
 
     }
 
@@ -169,15 +194,7 @@ bool ShaderCompiler::CompileFile(
 
     UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
 
-#ifdef SHADER_VIEWER_DEBUG
-
-    flags |= D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-
-#else
-
-    flags |= D3DCOMPILE_OPTIMIZATION_LEVEL3;
-
-#endif
+    flags |= D3DCOMPILE_SKIP_OPTIMIZATION;
 
 
 
@@ -276,7 +293,7 @@ bool ShaderCompiler::ApplyVertexShader(ID3D11Device* device, const CompiledShade
     if (!CreateInputLayout(device, vsCompiled.bytecode.Get())) return false;
 
     vs_ = vs;
-
+    vsBytecode_ = vsCompiled.bytecode;
     return true;
 
 }
@@ -298,7 +315,73 @@ bool ShaderCompiler::ApplyPixelShader(ID3D11Device* device, const CompiledShader
     }
 
     ps_ = ps;
+    psBytecode_ = psCompiled.bytecode;
+    return true;
 
+}
+
+
+
+bool ShaderCompiler::ApplyBlurVertexShader(ID3D11Device* device, const CompiledShader& blurCompiled) {
+
+    Microsoft::WRL::ComPtr<ID3D11VertexShader> vs;
+
+    if (FAILED(device->CreateVertexShader(
+
+            blurCompiled.bytecode->GetBufferPointer(), blurCompiled.bytecode->GetBufferSize(), nullptr, &vs))) {
+
+        lastError_ = "Failed to create normal blur vertex shader object.";
+
+        return false;
+
+    }
+
+    blurVs_ = vs;
+    blurVsBytecode_ = blurCompiled.bytecode;
+    return true;
+
+}
+
+
+
+bool ShaderCompiler::ApplyBlurPixelShader(ID3D11Device* device, const CompiledShader& blurCompiled) {
+
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> ps;
+
+    if (FAILED(device->CreatePixelShader(
+
+            blurCompiled.bytecode->GetBufferPointer(), blurCompiled.bytecode->GetBufferSize(), nullptr, &ps))) {
+
+        lastError_ = "Failed to create normal blur pixel shader object.";
+
+        return false;
+
+    }
+
+    blurPs_ = ps;
+    blurPsBytecode_ = blurCompiled.bytecode;
+    return true;
+
+}
+
+
+
+bool ShaderCompiler::ApplyAkfPixelShader(ID3D11Device* device, const CompiledShader& akfCompiled) {
+
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> ps;
+
+    if (FAILED(device->CreatePixelShader(
+
+            akfCompiled.bytecode->GetBufferPointer(), akfCompiled.bytecode->GetBufferSize(), nullptr, &ps))) {
+
+        lastError_ = "Failed to create normal akf pixel shader object.";
+
+        return false;
+
+    }
+
+    akfPs_ = ps;
+    akfPsBytecode_ = akfCompiled.bytecode;
     return true;
 
 }
@@ -336,6 +419,14 @@ bool ShaderCompiler::ReloadChanged(ID3D11Device* device, bool forceAll) {
         (static_cast<unsigned>(changed) & static_cast<unsigned>(ChangeMask::Pixel)) != 0 ||
 
         (static_cast<unsigned>(changed) & static_cast<unsigned>(ChangeMask::NormalModifier)) != 0;
+
+    const bool reloadBlurPS = forceAll || reloadCommon || reloadPS ||
+
+        (static_cast<unsigned>(changed) & static_cast<unsigned>(ChangeMask::NormalBlur)) != 0;
+
+    const bool reloadAkfPS = forceAll || reloadCommon || reloadPS ||
+
+        (static_cast<unsigned>(changed) & static_cast<unsigned>(ChangeMask::NormalAkf)) != 0;
 
 
 
@@ -415,6 +506,80 @@ bool ShaderCompiler::ReloadChanged(ID3D11Device* device, bool forceAll) {
 
 
 
+    if (reloadBlurPS) {
+
+        CompiledShader blurVsCompiled;
+        CompiledShader blurPsCompiled;
+
+        const auto blurVsPath = shaderRoot_ / L"normal_blur_vs.hlsl";
+        const auto blurPsPath = shaderRoot_ / L"normal_blur_ps.hlsl";
+
+        if (!CompileFile(blurVsPath, "VSMain", "vs_5_0", blurVsCompiled)) {
+
+            if (!anySuccess) lastReloadScope_ = "normal blur vertex";
+
+            return false;
+
+        }
+
+        if (!CompileFile(blurPsPath, "PSMain", "ps_5_0", blurPsCompiled)) {
+
+            if (!anySuccess) lastReloadScope_ = "normal blur pixel";
+
+            return false;
+
+        }
+
+        if (!ApplyBlurVertexShader(device, blurVsCompiled)) {
+
+            if (!anySuccess) lastReloadScope_ = "normal blur vertex";
+
+            return false;
+
+        }
+
+        if (!ApplyBlurPixelShader(device, blurPsCompiled)) {
+
+            if (!anySuccess) lastReloadScope_ = "normal blur pixel";
+
+            return false;
+
+        }
+
+        anySuccess = true;
+
+    }
+
+
+
+    if (reloadAkfPS) {
+
+        CompiledShader akfPsCompiled;
+
+        const auto akfPsPath = shaderRoot_ / L"normal_akf_ps.hlsl";
+
+        if (!CompileFile(akfPsPath, "PSMain", "ps_5_0", akfPsCompiled)) {
+
+            if (!anySuccess) lastReloadScope_ = "normal akf pixel";
+
+            return false;
+
+        }
+
+        if (!ApplyAkfPixelShader(device, akfPsCompiled)) {
+
+            if (!anySuccess) lastReloadScope_ = "normal akf pixel";
+
+            return false;
+
+        }
+
+        anySuccess = true;
+
+    }
+
+
+
     if (anySuccess) {
 
         lastError_.clear();
@@ -430,6 +595,148 @@ bool ShaderCompiler::ReloadChanged(ID3D11Device* device, bool forceAll) {
 
 
     return HasValidShaders();
+
+}
+
+
+
+bool ShaderCompiler::EnsurePostProcessShaders(ID3D11Device* device) {
+
+    if (blurVs_ && blurPs_ && akfPs_) return true;
+
+    CompiledShader blurVsCompiled;
+    CompiledShader blurPsCompiled;
+    CompiledShader akfPsCompiled;
+
+    const auto blurVsPath = shaderRoot_ / L"normal_blur_vs.hlsl";
+    const auto blurPsPath = shaderRoot_ / L"normal_blur_ps.hlsl";
+    const auto akfPsPath = shaderRoot_ / L"normal_akf_ps.hlsl";
+
+    if (!CompileFile(blurVsPath, "VSMain", "vs_5_0", blurVsCompiled)) return false;
+    if (!CompileFile(blurPsPath, "PSMain", "ps_5_0", blurPsCompiled)) return false;
+    if (!CompileFile(akfPsPath, "PSMain", "ps_5_0", akfPsCompiled)) return false;
+    if (!ApplyBlurVertexShader(device, blurVsCompiled)) return false;
+    if (!ApplyBlurPixelShader(device, blurPsCompiled)) return false;
+    if (!ApplyAkfPixelShader(device, akfPsCompiled)) return false;
+
+    blurVsStamp_ = FileStamp(blurVsPath);
+    blurPsStamp_ = FileStamp(blurPsPath);
+    akfPsStamp_ = FileStamp(akfPsPath);
+    akfCommonStamp_ = FileStamp(shaderRoot_ / L"kuwahara_common.hlsl");
+
+    return true;
+
+}
+
+
+
+std::filesystem::path ShaderCompiler::PrecompiledDir() const {
+
+    return shaderRoot_ / "builtin";
+
+}
+
+
+
+bool ShaderCompiler::LoadBytecodeFile(const std::filesystem::path& path, CompiledShader& out) const {
+
+    std::ifstream file(path, std::ios::binary);
+
+    if (!file) return false;
+
+    file.seekg(0, std::ios::end);
+
+    const std::streamsize size = file.tellg();
+
+    if (size <= 0) return false;
+
+    file.seekg(0, std::ios::beg);
+
+    std::vector<char> bytes(static_cast<size_t>(size));
+
+    if (!file.read(bytes.data(), size)) return false;
+
+
+
+    Microsoft::WRL::ComPtr<ID3DBlob> blob;
+
+    if (FAILED(D3DCreateBlob(bytes.size(), &blob))) return false;
+
+    std::memcpy(blob->GetBufferPointer(), bytes.data(), bytes.size());
+
+    out.bytecode = blob;
+
+    out.path = path.wstring();
+
+    return true;
+
+}
+
+
+
+bool ShaderCompiler::WriteBytecodeFile(const std::filesystem::path& path, ID3DBlob* blob) const {
+
+    if (!blob || blob->GetBufferSize() == 0) return false;
+
+    std::error_code ec;
+
+    std::filesystem::create_directories(path.parent_path(), ec);
+
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+
+    if (!file) return false;
+
+    file.write(static_cast<const char*>(blob->GetBufferPointer()), static_cast<std::streamsize>(blob->GetBufferSize()));
+
+    return static_cast<bool>(file);
+
+}
+
+
+
+bool ShaderCompiler::TryLoadPrecompiled(ID3D11Device* device) {
+
+    const auto dir = PrecompiledDir();
+
+    CompiledShader vsCompiled;
+
+    CompiledShader psCompiled;
+
+    if (!LoadBytecodeFile(dir / "material_vs.cso", vsCompiled)) return false;
+
+    if (!LoadBytecodeFile(dir / "material_ps.cso", psCompiled)) return false;
+
+
+
+    if (!ApplyVertexShader(device, vsCompiled)) return false;
+
+    if (!ApplyPixelShader(device, psCompiled)) return false;
+
+
+
+    lastError_.clear();
+
+    lastReloadScope_ = "precompiled";
+
+    lastSuccess_ = std::chrono::system_clock::now();
+
+    RefreshStamps();
+
+    return true;
+
+}
+
+
+
+bool ShaderCompiler::ExportPrecompiled(const std::filesystem::path& outputDir) const {
+
+    if (!vsBytecode_ || !psBytecode_) return false;
+
+    const bool okVs = WriteBytecodeFile(outputDir / "material_vs.cso", vsBytecode_.Get());
+
+    const bool okPs = WriteBytecodeFile(outputDir / "material_ps.cso", psBytecode_.Get());
+
+    return okVs && okPs;
 
 }
 

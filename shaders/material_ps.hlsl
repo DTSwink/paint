@@ -58,14 +58,47 @@ float3 FresnelSchlick(float cosTheta, float3 F0)
 
 float3 ApplyNormalModifier(float3 normal, float3 tangent, float3 bitangent, float2 uv, float3 worldPos)
 {
-    if (NormalModifierEnabled == 0 && LivePaintEnabled == 0)
+    if (NormalModifierEnabled == 0 || LivePaintEnabled == 0)
         return normalize(normal);
     return ModifyNormal(normal, tangent, bitangent, uv, worldPos);
+}
+
+float3 DecodePaintedNormal(float3 encodedNormal, float2 uv, float3 worldPos, float3 tangent, float3 bitangent, float3 geometryNormal)
+{
+    float3 painted = PaintNormalViewColor(saturate(encodedNormal), uv, worldPos, tangent, bitangent, geometryNormal);
+    return normalize(painted * 2.0 - 1.0);
 }
 
 float3 ResolveShadingNormal(float3 geometryNormal, float3 tangent, float3 bitangent, float2 uv, float3 worldPos)
 {
     float3 N = normalize(geometryNormal);
+    float3 T = normalize(tangent);
+    float3 B = normalize(bitangent);
+
+    if (NormalModifierEnabled != 0 && LivePaintEnabled != 0)
+    {
+        if (NormalViewSpace == 0)
+        {
+            float3 tangentNormal = float3(0.0, 0.0, 1.0);
+            if (HasNormal)
+            {
+                tangentNormal = NormalMap.Sample(LinearWrapSampler, uv).xyz * 2.0 - 1.0;
+                if (FlipNormalGreen != 0)
+                    tangentNormal.y = -tangentNormal.y;
+                tangentNormal.xy *= NormalStrength;
+                tangentNormal = normalize(tangentNormal);
+            }
+            tangentNormal = DecodePaintedNormal(tangentNormal * 0.5 + 0.5, uv, worldPos, T, B, N);
+            float3x3 TBN = float3x3(T, B, N);
+            return normalize(mul(tangentNormal, TBN));
+        }
+
+        float3 objectNormal = NormalViewSpace == 2
+            ? normalize(cross(ddx(worldPos), ddy(worldPos)))
+            : N;
+        return DecodePaintedNormal(objectNormal * 0.5 + 0.5, uv, worldPos, T, B, objectNormal);
+    }
+
     if (HasNormal)
     {
         float3 nTex = NormalMap.Sample(LinearWrapSampler, uv).xyz * 2.0 - 1.0;
@@ -73,13 +106,8 @@ float3 ResolveShadingNormal(float3 geometryNormal, float3 tangent, float3 bitang
             nTex.y = -nTex.y;
         nTex.xy *= NormalStrength;
         nTex = normalize(nTex);
-        nTex = ApplyNormalModifier(nTex, tangent, bitangent, uv, worldPos);
-        float3x3 TBN = float3x3(normalize(tangent), normalize(bitangent), normalize(N));
+        float3x3 TBN = float3x3(T, B, N);
         N = normalize(mul(nTex, TBN));
-    }
-    else
-    {
-        N = ApplyNormalModifier(N, tangent, bitangent, uv, worldPos);
     }
     return N;
 }
@@ -203,7 +231,7 @@ float3 EncodeNormalForView(float3 normal, float3 tangent, float3 bitangent, floa
     N *= NormalViewScale;
     float3 encoded = saturate(N * 0.5 + 0.5);
     if (LivePaintEnabled != 0 && NormalModifierEnabled != 0)
-        encoded = PaintNormalViewColor(encoded, uv, worldPos);
+        encoded = PaintNormalViewColor(encoded, uv, worldPos, tangent, bitangent, normal);
     return encoded;
 }
 
@@ -224,7 +252,10 @@ float3 EncodeTangentNormalForView(float3 tangentNormal, float2 uv, float3 worldP
     float3 N = normalize(tangentNormal);
     N = ApplyNormalModifier(N, T, B, uv, worldPos);
     N *= NormalViewScale;
-    return saturate(N * 0.5 + 0.5);
+    float3 encoded = saturate(N * 0.5 + 0.5);
+    if (LivePaintEnabled != 0 && NormalModifierEnabled != 0)
+        encoded = PaintNormalViewColor(encoded, uv, worldPos, T, B, float3(0.0, 0.0, 1.0));
+    return encoded;
 }
 
 float3 SampleTangentNormalFromMap(float2 uv)

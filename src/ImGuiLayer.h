@@ -33,12 +33,13 @@ struct AppState {
     float scatterStrength = 0.35f;
     float exposure = 1.f;
     float time = 0.f;
-    std::string scanRoot = "C:\\Users\\singerie\\Documents\\Cursor\\Berserk";
-    char scanRootEdit[512] = "C:\\Users\\singerie\\Documents\\Cursor\\Berserk";
+    std::string scanRoot;
+    char scanRootEdit[512] = "";
     std::wstring shaderRoot;
     std::wstring statusMessage;
-    bool requestRescan = true;
+    bool requestRescan = false;
     bool requestApplySavedSettings = false;
+    bool requestDeferredStartup = false;
     bool requestShaderReload = false;
     bool requestResetCamera = false;
     bool requestResetFlatView = false;
@@ -59,6 +60,7 @@ struct AppState {
     float savedCameraYaw = 0.f;
     float savedCameraPitch = 0.25f;
     float savedCameraDistance = 3.f;
+    bool applyModifierToRender = false;
 };
 
 namespace sv {
@@ -83,6 +85,7 @@ private:
     void DrawLivePaintPanel(AppState& app);
     void DrawShadersPanel(AppState& app);
     void DrawViewportOverlay(const AppState& app);
+    void DrawQuickViewControls(AppState& app);
     void DrawChannelCombo(const char* label, PackedChannelMeaning& value);
     const char* SlotLabel(TextureSlot slot) const;
 };

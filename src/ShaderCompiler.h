@@ -19,15 +19,21 @@ public:
     void SetShaderRoot(const std::filesystem::path& root);
     bool CompileAll(ID3D11Device* device);
     bool ReloadChanged(ID3D11Device* device, bool forceAll = false);
+    bool TryLoadPrecompiled(ID3D11Device* device);
+    bool EnsurePostProcessShaders(ID3D11Device* device);
+    bool ExportPrecompiled(const std::filesystem::path& outputDir) const;
 
     ID3D11VertexShader* VertexShader() const { return vs_.Get(); }
     ID3D11PixelShader* PixelShader() const { return ps_.Get(); }
+    ID3D11VertexShader* BlurVertexShader() const { return blurVs_.Get(); }
+    ID3D11PixelShader* BlurPixelShader() const { return blurPs_.Get(); }
+    ID3D11PixelShader* AkfPixelShader() const { return akfPs_.Get(); }
     ID3D11InputLayout* InputLayout() const { return inputLayout_.Get(); }
 
     const std::string& LastError() const { return lastError_; }
     const std::string& LastReloadScope() const { return lastReloadScope_; }
     const std::filesystem::path& ShaderRoot() const { return shaderRoot_; }
-    bool HasValidShaders() const { return vs_ && ps_; }
+    bool HasValidShaders() const { return vs_ && ps_ && blurVs_ && blurPs_ && akfPs_; }
     std::chrono::system_clock::time_point LastSuccessTime() const { return lastSuccess_; }
 
 private:
@@ -37,12 +43,22 @@ private:
         Vertex = 2,
         Pixel = 4,
         NormalModifier = 8,
-        All = Common | Vertex | Pixel | NormalModifier
+        NormalBlur = 16,
+        NormalAkf = 32,
+        All = Common | Vertex | Pixel | NormalModifier | NormalBlur | NormalAkf
     };
 
     std::filesystem::path shaderRoot_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> vs_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> ps_;
+    Microsoft::WRL::ComPtr<ID3D11VertexShader> blurVs_;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> blurPs_;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> akfPs_;
+    Microsoft::WRL::ComPtr<ID3DBlob> vsBytecode_;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBytecode_;
+    Microsoft::WRL::ComPtr<ID3DBlob> blurVsBytecode_;
+    Microsoft::WRL::ComPtr<ID3DBlob> blurPsBytecode_;
+    Microsoft::WRL::ComPtr<ID3DBlob> akfPsBytecode_;
     Microsoft::WRL::ComPtr<ID3D11InputLayout> inputLayout_;
     std::string lastError_;
     std::string lastReloadScope_;
@@ -52,13 +68,23 @@ private:
     std::filesystem::file_time_type vsStamp_{};
     std::filesystem::file_time_type psStamp_{};
     std::filesystem::file_time_type modifierStamp_{};
-    std::filesystem::file_time_type livePaintCommonStamp_{};
+    std::filesystem::file_time_type modifierCommonStamp_{};
+    std::filesystem::file_time_type blurVsStamp_{};
+    std::filesystem::file_time_type blurPsStamp_{};
+    std::filesystem::file_time_type akfPsStamp_{};
+    std::filesystem::file_time_type akfCommonStamp_{};
     bool stampsInitialized_ = false;
 
     bool CompileFile(const std::filesystem::path& path, const char* entry, const char* target, CompiledShader& out);
+    bool LoadBytecodeFile(const std::filesystem::path& path, CompiledShader& out) const;
+    bool WriteBytecodeFile(const std::filesystem::path& path, ID3DBlob* blob) const;
+    std::filesystem::path PrecompiledDir() const;
     bool CreateInputLayout(ID3D11Device* device, ID3DBlob* vsBlob);
     bool ApplyVertexShader(ID3D11Device* device, const CompiledShader& vsCompiled);
     bool ApplyPixelShader(ID3D11Device* device, const CompiledShader& psCompiled);
+    bool ApplyBlurVertexShader(ID3D11Device* device, const CompiledShader& blurCompiled);
+    bool ApplyBlurPixelShader(ID3D11Device* device, const CompiledShader& blurCompiled);
+    bool ApplyAkfPixelShader(ID3D11Device* device, const CompiledShader& akfCompiled);
 
     std::filesystem::file_time_type FileStamp(const std::filesystem::path& path) const;
     void RefreshStamps();

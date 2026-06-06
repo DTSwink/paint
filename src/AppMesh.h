@@ -14,6 +14,7 @@ void FocusCameraOnMesh(Camera& camera, const std::vector<Vertex>& vertices, Dire
     float& outRadius);
 bool LoadMeshFromPath(const std::filesystem::path& path, PreviewMeshKind kind, GpuMesh& outMesh, AppState& app,
                       ID3D11Device* device);
+bool LoadStartupMesh(GpuMesh& outMesh, AppState& app, ID3D11Device* device);
 bool LoadDefaultMesh(GpuMesh& outMesh, AppState& app, ID3D11Device* device);
 
 } // namespace sv

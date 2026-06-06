@@ -74,6 +74,15 @@ bool LoadMeshFromPath(
     return true;
 }
 
+bool LoadStartupMesh(GpuMesh& outMesh, AppState& app, ID3D11Device* device) {
+    const MeshData sphere = MeshGen::CreateSphere();
+    outMesh = RendererD3D11::UploadMesh(device, sphere.vertices, sphere.indices);
+    app.meshKind = PreviewMeshKind::Sphere;
+    app.selectedMesh = -1;
+    FocusCameraOnMesh(app.camera, sphere.vertices, app.meshFocusCenter, app.meshFocusRadius);
+    return true;
+}
+
 bool LoadDefaultMesh(GpuMesh& outMesh, AppState& app, ID3D11Device* device) {
     if (LoadMeshFromPath(ResolveSuzannePath(), PreviewMeshKind::Suzanne, outMesh, app, device)) {
         return true;

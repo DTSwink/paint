@@ -8,7 +8,7 @@ if not exist %FXC% (
   exit /b 0
 )
 echo Testing HLSL compile...
-%FXC% /nologo /T ps_5_0 /E PSMain /I "%ROOT%\shaders" "%SHADER%" >nul
+%FXC% /nologo /Od /T ps_5_0 /E PSMain /I "%ROOT%\shaders" "%SHADER%" >nul
 if errorlevel 1 (
   echo FAIL: material_ps.hlsl did not compile
   exit /b 1

@@ -9,8 +9,8 @@ namespace sv {
 
 namespace fs = std::filesystem;
 
-inline constexpr wchar_t kDefaultScanRoot[] = L"C:\\Users\\singerie\\Documents\\Cursor\\Berserk";
-inline constexpr wchar_t kExportFolder[] = L"C:\\Users\\singerie\\Documents\\Cursor\\Berserk\\Saved\\ShaderViewerExports";
+inline constexpr wchar_t kDefaultScanRoot[] = L"";
+inline constexpr wchar_t kExportFolder[] = L"Saved\\ShaderViewerExports";
 
 enum class TextureSlot : int {
     Albedo = 0,

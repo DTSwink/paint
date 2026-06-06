@@ -6,6 +6,7 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -87,6 +88,7 @@ void ApplyKey(AppState& app, const std::string& key, const std::string& value) {
     else if (key == "flatViewPanX") view.flatViewPanX = ParseFloat(value, view.flatViewPanX);
     else if (key == "flatViewPanY") view.flatViewPanY = ParseFloat(value, view.flatViewPanY);
     else if (key == "flatViewZoom") view.flatViewZoom = ParseFloat(value, view.flatViewZoom);
+    else if (key == "applyModifierToRender") app.applyModifierToRender = ParseBool(value);
     else if (key == "activeSidebarTab") app.activeSidebarTab = ParseInt(value, app.activeSidebarTab);
     else if (key == "baseColorR") mat.baseColorFactor.x = ParseFloat(value, mat.baseColorFactor.x);
     else if (key == "baseColorG") mat.baseColorFactor.y = ParseFloat(value, mat.baseColorFactor.y);
@@ -137,7 +139,7 @@ void ApplyKey(AppState& app, const std::string& key, const std::string& value) {
     else if (key == "lpMaxStrokeOpacity") app.livePaint.maxStrokeOpacity = ParseFloat(value, app.livePaint.maxStrokeOpacity);
     else if (key == "lpOpacityThreshold") {
         app.livePaint.opacityThreshold = ParseFloat(value, app.livePaint.opacityThreshold);
-        app.livePaint.opacityThreshold = std::min(app.livePaint.opacityThreshold, 1.f);
+        app.livePaint.opacityThreshold = std::clamp(app.livePaint.opacityThreshold, 1.f, 100.f);
     }
     else if (key == "lpStackDirection") app.livePaint.stackDirection = ParseBool(value);
     else if (key == "lpBrokenEdges") app.livePaint.brokenEdges = ParseBool(value);
@@ -152,7 +154,43 @@ void ApplyKey(AppState& app, const std::string& key, const std::string& value) {
     else if (key == "lpBrushGrid") app.livePaint.brushGrid = ParseFloat(value, app.livePaint.brushGrid);
     else if (key == "lpCanvasStrength") app.livePaint.canvasStrength = ParseFloat(value, app.livePaint.canvasStrength);
     else if (key == "lpBrushNormalScale") app.livePaint.brushNormalScale = ParseFloat(value, app.livePaint.brushNormalScale);
+    else if (key == "lpPreviewExaggeration") app.livePaint.previewExaggeration = ParseFloat(value, app.livePaint.previewExaggeration);
+    else if (key == "lpFlatBrushBody") app.livePaint.flatBrushBody = ParseFloat(value, app.livePaint.flatBrushBody);
+    else if (key == "lpFlatOpacityBoost") app.livePaint.flatOpacityBoost = ParseFloat(value, app.livePaint.flatOpacityBoost);
+    else if (key == "lpFlatColorFollow") app.livePaint.flatColorFollow = ParseFloat(value, app.livePaint.flatColorFollow);
+    else if (key == "lpFlatLayerBlocking") app.livePaint.flatLayerBlocking = ParseFloat(value, app.livePaint.flatLayerBlocking);
+    else if (key == "lpFlatAccumulation") app.livePaint.flatAccumulation = ParseFloat(value, app.livePaint.flatAccumulation);
+    else if (key == "lpFlatStrokeLength") app.livePaint.flatStrokeLength = ParseFloat(value, app.livePaint.flatStrokeLength);
+    else if (key == "lpFlatStrokeWidth") app.livePaint.flatStrokeWidth = ParseFloat(value, app.livePaint.flatStrokeWidth);
+    else if (key == "lpFlatPaintOpacity") app.livePaint.flatPaintOpacity = ParseFloat(value, app.livePaint.flatPaintOpacity);
     else if (key == "lpBaking") app.livePaint.baking = ParseInt(value, app.livePaint.baking);
+    else if (key == "akfRadius") app.livePaint.kuwaharaRadius = ParseFloat(value, app.livePaint.kuwaharaRadius);
+    else if (key == "akfStrength") app.livePaint.kuwaharaStrength = ParseFloat(value, app.livePaint.kuwaharaStrength);
+    else if (key == "akfSharpness") app.livePaint.kuwaharaSharpness = ParseFloat(value, app.livePaint.kuwaharaSharpness);
+    else if (key == "akfHardness") {
+        float v = ParseFloat(value, app.livePaint.kuwaharaHardness);
+        if (v > 4.f)
+            v = std::max(v / 8.f, 0.25f);
+        app.livePaint.kuwaharaHardness = v;
+    }
+    else if (key == "akfEccentricity") app.livePaint.kuwaharaEccentricity = ParseFloat(value, app.livePaint.kuwaharaEccentricity);
+    else if (key == "akfAnisotropy") app.livePaint.kuwaharaAnisotropy = ParseFloat(value, app.livePaint.kuwaharaAnisotropy);
+    else if (key == "noiseType") app.livePaint.noiseType = ParseInt(value, app.livePaint.noiseType);
+    else if (key == "noiseAmount") {
+        app.livePaint.noiseAmount = ParseFloat(value, app.livePaint.noiseAmount);
+        if (app.livePaint.noiseAmount > 1.f)
+            app.livePaint.noiseAmount /= 10.f;
+        app.livePaint.noiseAmount = std::clamp(app.livePaint.noiseAmount, 0.f, 1.f);
+    }
+    else if (key == "noiseScale") app.livePaint.noiseScale = ParseFloat(value, app.livePaint.noiseScale);
+    else if (key == "noiseSeed") app.livePaint.noiseSeed = ParseFloat(value, app.livePaint.noiseSeed);
+    else if (key == "noiseOctaves") app.livePaint.noiseOctaves = ParseInt(value, app.livePaint.noiseOctaves);
+    else if (key == "noiseLacunarity") app.livePaint.noiseLacunarity = ParseFloat(value, app.livePaint.noiseLacunarity);
+    else if (key == "noiseGain") app.livePaint.noiseGain = ParseFloat(value, app.livePaint.noiseGain);
+    else if (key == "noiseJitter") app.livePaint.noiseJitter = ParseFloat(value, app.livePaint.noiseJitter);
+    else if (key == "noiseContrast") app.livePaint.noiseContrast = ParseFloat(value, app.livePaint.noiseContrast);
+    else if (key == "noiseAngle") app.livePaint.noiseAngle = ParseFloat(value, app.livePaint.noiseAngle);
+    else if (key == "noiseDirectionality") app.livePaint.noiseDirectionality = ParseFloat(value, app.livePaint.noiseDirectionality);
 }
 
 bool LoadFromPath(const std::filesystem::path& path, AppState& app) {
@@ -221,6 +259,7 @@ bool UserSettings::Save(const AppState& app) {
     out << "flatViewPanX=" << view.flatViewPanX << '\n';
     out << "flatViewPanY=" << view.flatViewPanY << '\n';
     out << "flatViewZoom=" << view.flatViewZoom << '\n';
+    out << "applyModifierToRender=" << (app.applyModifierToRender ? 1 : 0) << '\n';
 
     out << "baseColorR=" << mat.baseColorFactor.x << '\n';
     out << "baseColorG=" << mat.baseColorFactor.y << '\n';
@@ -293,7 +332,33 @@ bool UserSettings::Save(const AppState& app) {
     out << "lpBrushGrid=" << lp.brushGrid << '\n';
     out << "lpCanvasStrength=" << lp.canvasStrength << '\n';
     out << "lpBrushNormalScale=" << lp.brushNormalScale << '\n';
+    out << "lpPreviewExaggeration=" << lp.previewExaggeration << '\n';
+    out << "lpFlatBrushBody=" << lp.flatBrushBody << '\n';
+    out << "lpFlatOpacityBoost=" << lp.flatOpacityBoost << '\n';
+    out << "lpFlatColorFollow=" << lp.flatColorFollow << '\n';
+    out << "lpFlatLayerBlocking=" << lp.flatLayerBlocking << '\n';
+    out << "lpFlatAccumulation=" << lp.flatAccumulation << '\n';
+    out << "lpFlatStrokeLength=" << lp.flatStrokeLength << '\n';
+    out << "lpFlatStrokeWidth=" << lp.flatStrokeWidth << '\n';
+    out << "lpFlatPaintOpacity=" << lp.flatPaintOpacity << '\n';
     out << "lpBaking=" << lp.baking << '\n';
+    out << "akfRadius=" << lp.kuwaharaRadius << '\n';
+    out << "akfStrength=" << lp.kuwaharaStrength << '\n';
+    out << "akfSharpness=" << lp.kuwaharaSharpness << '\n';
+    out << "akfHardness=" << lp.kuwaharaHardness << '\n';
+    out << "akfEccentricity=" << lp.kuwaharaEccentricity << '\n';
+    out << "akfAnisotropy=" << lp.kuwaharaAnisotropy << '\n';
+    out << "noiseType=" << lp.noiseType << '\n';
+    out << "noiseAmount=" << lp.noiseAmount << '\n';
+    out << "noiseScale=" << lp.noiseScale << '\n';
+    out << "noiseSeed=" << lp.noiseSeed << '\n';
+    out << "noiseOctaves=" << lp.noiseOctaves << '\n';
+    out << "noiseLacunarity=" << lp.noiseLacunarity << '\n';
+    out << "noiseGain=" << lp.noiseGain << '\n';
+    out << "noiseJitter=" << lp.noiseJitter << '\n';
+    out << "noiseContrast=" << lp.noiseContrast << '\n';
+    out << "noiseAngle=" << lp.noiseAngle << '\n';
+    out << "noiseDirectionality=" << lp.noiseDirectionality << '\n';
 
     return static_cast<bool>(out);
 }

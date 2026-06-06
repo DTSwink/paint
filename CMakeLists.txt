@@ -97,12 +97,21 @@ add_custom_command(TARGET ShaderViewer POST_BUILD
     COMMENT "Copying assets to output directory"
 )
 
-# Copy shaders next to executable
+# Copy shaders next to executable (includes optional precompiled builtin/*.cso)
 add_custom_command(TARGET ShaderViewer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_SOURCE_DIR}/shaders"
         "$<TARGET_FILE_DIR:ShaderViewer>/shaders"
     COMMENT "Copying shaders to output directory"
+)
+
+add_custom_command(TARGET ShaderViewer POST_BUILD
+    COMMAND powershell -ExecutionPolicy Bypass -File
+        "${CMAKE_SOURCE_DIR}/tools/compile_shaders.ps1"
+        -ShaderRoot "${CMAKE_SOURCE_DIR}/shaders"
+        -OutputDir "$<TARGET_FILE_DIR:ShaderViewer>/shaders/builtin"
+        -Exe "$<TARGET_FILE:ShaderViewer>"
+    COMMENT "Exporting precompiled shaders"
 )
 
 add_custom_command(TARGET ShaderViewer POST_BUILD

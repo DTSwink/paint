@@ -138,7 +138,7 @@ void RendererD3D11::CreateSamplers() {
 
     D3D11_SAMPLER_DESC pointDesc = sd;
     pointDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-    pointDesc.AddressU = pointDesc.AddressV = pointDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+    pointDesc.AddressU = pointDesc.AddressV = pointDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     device_->CreateSamplerState(&pointDesc, &pointSampler_);
 }
 
@@ -190,6 +190,62 @@ GpuMesh RendererD3D11::UploadMesh(ID3D11Device* device, const std::vector<Vertex
     return mesh;
 }
 
+bool RendererD3D11::EnsurePreviewTarget(int width, int height) {
+    if (width <= 0 || height <= 0) return false;
+    if (previewColorRTV_ && previewWidth_ == width && previewHeight_ == height) return true;
+
+    previewColorRTV_.Reset();
+    previewColorSRV_.Reset();
+    previewColorTex_.Reset();
+    previewBlurRTV_.Reset();
+    previewBlurSRV_.Reset();
+    previewBlurTex_.Reset();
+    previewTempRTV_.Reset();
+    previewTempSRV_.Reset();
+    previewTempTex_.Reset();
+    previewDepthDSV_.Reset();
+    previewDepthTex_.Reset();
+
+    auto makeColorTarget = [&](UINT w, UINT h, ComPtr<ID3D11Texture2D>& tex, ComPtr<ID3D11RenderTargetView>& rtv,
+                                ComPtr<ID3D11ShaderResourceView>& srv) -> bool {
+        D3D11_TEXTURE2D_DESC colorDesc{};
+        colorDesc.Width = w;
+        colorDesc.Height = h;
+        colorDesc.MipLevels = 1;
+        colorDesc.ArraySize = 1;
+        colorDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        colorDesc.SampleDesc.Count = 1;
+        colorDesc.Usage = D3D11_USAGE_DEFAULT;
+        colorDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        if (FAILED(device_->CreateTexture2D(&colorDesc, nullptr, &tex))) return false;
+        if (FAILED(device_->CreateRenderTargetView(tex.Get(), nullptr, &rtv))) return false;
+        if (FAILED(device_->CreateShaderResourceView(tex.Get(), nullptr, &srv))) return false;
+        return true;
+    };
+
+    if (!makeColorTarget(static_cast<UINT>(width), static_cast<UINT>(height), previewColorTex_, previewColorRTV_, previewColorSRV_))
+        return false;
+    if (!makeColorTarget(static_cast<UINT>(width), static_cast<UINT>(height), previewBlurTex_, previewBlurRTV_, previewBlurSRV_))
+        return false;
+    if (!makeColorTarget(static_cast<UINT>(width), static_cast<UINT>(height), previewTempTex_, previewTempRTV_, previewTempSRV_))
+        return false;
+    D3D11_TEXTURE2D_DESC depthDesc{};
+    depthDesc.Width = static_cast<UINT>(width);
+    depthDesc.Height = static_cast<UINT>(height);
+    depthDesc.MipLevels = 1;
+    depthDesc.ArraySize = 1;
+    depthDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    depthDesc.SampleDesc.Count = 1;
+    depthDesc.Usage = D3D11_USAGE_DEFAULT;
+    depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    if (FAILED(device_->CreateTexture2D(&depthDesc, nullptr, &previewDepthTex_))) return false;
+    if (FAILED(device_->CreateDepthStencilView(previewDepthTex_.Get(), nullptr, &previewDepthDSV_))) return false;
+
+    previewWidth_ = width;
+    previewHeight_ = height;
+    return true;
+}
+
 void RendererD3D11::BeginFrame() {
     if (!rtv_) return;
 
@@ -220,7 +276,8 @@ void RendererD3D11::Render(
     const LivePaintParams& livePaint,
     const LivePaintAssets& livePaintAssets,
     const GpuMesh& mesh,
-    ShaderCompiler& shaders) {
+    ShaderCompiler& shaders,
+    bool applyModifierToRender) {
     if (!shaders.HasValidShaders()) return;
 
     const bool flatPreview = materialParams.view.presentation == ViewPresentation::Flat &&
@@ -285,7 +342,18 @@ void RendererD3D11::Render(
     context_->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
     context_->IASetIndexBuffer(drawMesh.indexBuffer.Get(), DXGI_FORMAT_R32_UINT, 0);
 
-    auto drawPass = [&](float vpX, float vpW, bool normalModifierEnabled, bool livePaintForPass) {
+    auto drawPass = [&](float vpX, float vpW, bool normalModifierEnabled, bool livePaintForPass, bool skipInShaderBlur,
+                          ID3D11RenderTargetView* targetRTV, ID3D11DepthStencilView* targetDSV) {
+        if (targetRTV) {
+            ID3D11RenderTargetView* rtvs[] = {targetRTV};
+            context_->OMSetRenderTargets(1, rtvs, targetDSV);
+            const float clearColor[4] = {0.08f, 0.09f, 0.11f, 1.f};
+            context_->ClearRenderTargetView(targetRTV, clearColor);
+            if (targetDSV) {
+                context_->ClearDepthStencilView(targetDSV, D3D11_CLEAR_DEPTH, 1.f, 0);
+            }
+        }
+
         D3D11_VIEWPORT vp{};
         vp.TopLeftX = vpX;
         vp.TopLeftY = 0.f;
@@ -303,9 +371,16 @@ void RendererD3D11::Render(
 
         LivePaintParams passParams = livePaint;
         passParams.enabled = livePaintForPass;
+        passParams.skipInShaderBlur = skipInShaderBlur ? 1 : 0;
         passParams.previewExaggeration =
             (normalModifierEnabled && livePaintForPass) ? livePaint.previewExaggeration : 1.f;
-        const LivePaintCBData livePaintCB = BuildLivePaintCB(passParams, time);
+        LivePaintCBData livePaintCB = BuildLivePaintCB(passParams, time);
+        if (skipInShaderBlur) {
+            livePaintCB.blurSourceTexelSizeX = 1.f / std::max(vpW, 1.f);
+            livePaintCB.blurSourceTexelSizeY = 1.f / std::max(viewportH, 1.f);
+            livePaintCB.blurViewportOriginX = 0.f;
+            livePaintCB.blurViewportOriginY = 0.f;
+        }
 
         D3D11_MAPPED_SUBRESOURCE mapped{};
         if (SUCCEEDED(context_->Map(frameCB_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -331,12 +406,161 @@ void RendererD3D11::Render(
         context_->DrawIndexed(drawMesh.indexCount, 0, 0);
     };
 
+    const bool meshWorldBlur = splitNormalModify && materialParams.view.normalSpace != NormalViewSpace::Tangent;
+    const bool blurActive = livePaint.enabled && livePaint.noiseType != 0 && livePaint.noiseAmount > 0.f;
+    const bool akfActive = livePaint.enabled && livePaint.kuwaharaStrength > 0.f;
+    const bool usePostBlur = splitNormalModify && meshWorldBlur && blurActive &&
+        shaders.BlurPixelShader() != nullptr && shaders.BlurVertexShader() != nullptr;
+    const bool usePostAkfPass = usePostBlur && akfActive && shaders.AkfPixelShader() != nullptr;
+    const bool usePostProcess = usePostBlur;
+
     if (splitNormalModify) {
         const float halfW = viewportW * 0.5f;
-        drawPass(viewportX, halfW, false, false);
-        drawPass(viewportX + halfW, halfW, true, true);
+        drawPass(viewportX, halfW, false, false, false, nullptr, nullptr);
+
+        if (usePostProcess && EnsurePreviewTarget(static_cast<int>(halfW), static_cast<int>(viewportH))) {
+            drawPass(0.f, halfW, true, true, true, previewColorRTV_.Get(), previewDepthDSV_.Get());
+
+            context_->OMSetRenderTargets(0, nullptr, nullptr);
+
+            MaterialCBData blurMatCB = material.BuildCB(materialParams, true);
+            blurMatCB.viewFlatPreview = 0;
+
+            context_->VSSetShader(shaders.BlurVertexShader(), nullptr, 0);
+            context_->IASetInputLayout(nullptr);
+            context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            context_->OMSetDepthStencilState(depthDisabledState_.Get(), 0);
+            context_->RSSetState(rasterStateNoCull_.Get());
+
+            ID3D11ShaderResourceView* filteredSrv = previewColorSRV_.Get();
+
+            if (usePostBlur && shaders.BlurPixelShader() != nullptr) {
+                context_->PSSetShader(shaders.BlurPixelShader(), nullptr, 0);
+
+                auto runBlurPass = [&](ID3D11RenderTargetView* target, ID3D11ShaderResourceView* source,
+                                       ID3D11ShaderResourceView* originalSource, int direction, float originX,
+                                       float originY, bool clearTarget, float strengthOverride = -1.f) {
+                ID3D11RenderTargetView* rtvs[] = {target};
+                context_->OMSetRenderTargets(1, rtvs, nullptr);
+                if (clearTarget) {
+                    const float clearColor[4] = {0.f, 0.f, 0.f, 1.f};
+                    context_->ClearRenderTargetView(target, clearColor);
+                }
+
+                D3D11_VIEWPORT blurVp{};
+                blurVp.TopLeftX = originX;
+                blurVp.TopLeftY = originY;
+                blurVp.Width = halfW;
+                blurVp.Height = viewportH;
+                blurVp.MaxDepth = 1.f;
+                context_->RSSetViewports(1, &blurVp);
+
+                ID3D11ShaderResourceView* blurSrvs[] = {source};
+                context_->PSSetShaderResources(8, 1, blurSrvs);
+                ID3D11ShaderResourceView* originalSrvs[] = {originalSource};
+                context_->PSSetShaderResources(9, 1, originalSrvs);
+
+                LivePaintParams blurParams = livePaint;
+                blurParams.skipInShaderBlur = 0;
+                if (strengthOverride >= 0.f)
+                    blurParams.noiseAmount = strengthOverride;
+                LivePaintCBData blurCB = BuildLivePaintCB(blurParams, time);
+                blurCB.blurViewportOriginX = 0.f;
+                blurCB.blurViewportOriginY = 0.f;
+                blurCB.blurPassDirection = direction;
+                blurCB.blurSourceTexelSizeX = 1.f / std::max(halfW, 1.f);
+                blurCB.blurSourceTexelSizeY = 1.f / std::max(viewportH, 1.f);
+
+                D3D11_MAPPED_SUBRESOURCE mapped{};
+                if (SUCCEEDED(context_->Map(materialCB_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+                    memcpy(mapped.pData, &blurMatCB, sizeof(blurMatCB));
+                    context_->Unmap(materialCB_.Get(), 0);
+                }
+                if (SUCCEEDED(context_->Map(livePaintCB_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+                    memcpy(mapped.pData, &blurCB, sizeof(blurCB));
+                    context_->Unmap(livePaintCB_.Get(), 0);
+                }
+                ID3D11Buffer* cbs[] = {frameCB_.Get(), objectCB_.Get(), materialCB_.Get(), livePaintCB_.Get()};
+                context_->VSSetConstantBuffers(0, 4, cbs);
+                context_->PSSetConstantBuffers(0, 4, cbs);
+                context_->Draw(3, 0);
+                };
+
+                runBlurPass(previewBlurRTV_.Get(), previewColorSRV_.Get(), nullptr, 0, 0.f, 0.f, true);
+                runBlurPass(previewTempRTV_.Get(), previewBlurSRV_.Get(), nullptr, 1, 0.f, 0.f, true, 1.f);
+
+                if (usePostAkfPass) {
+                    runBlurPass(previewBlurRTV_.Get(), previewTempSRV_.Get(), previewColorSRV_.Get(), 2, 0.f, 0.f, true);
+                    filteredSrv = previewBlurSRV_.Get();
+                } else {
+                    context_->OMSetRenderTargets(1, rtv_.GetAddressOf(), dsv_.Get());
+                    runBlurPass(rtv_.Get(), previewTempSRV_.Get(), previewColorSRV_.Get(), 2, viewportX + halfW, 0.f,
+                        false);
+                    filteredSrv = nullptr;
+                }
+            }
+
+            if (usePostAkfPass && filteredSrv != nullptr) {
+                auto runAkfPass = [&](ID3D11RenderTargetView* target, ID3D11ShaderResourceView* source, float originX) {
+                ID3D11RenderTargetView* rtvs[] = {target};
+                context_->OMSetRenderTargets(1, rtvs, nullptr);
+
+                D3D11_VIEWPORT akfVp{};
+                akfVp.TopLeftX = originX;
+                akfVp.TopLeftY = 0.f;
+                akfVp.Width = halfW;
+                akfVp.Height = viewportH;
+                akfVp.MaxDepth = 1.f;
+                context_->RSSetViewports(1, &akfVp);
+
+                context_->PSSetShader(shaders.AkfPixelShader(), nullptr, 0);
+                context_->VSSetShader(shaders.BlurVertexShader(), nullptr, 0);
+
+                ID3D11ShaderResourceView* akfSrvs[] = {source};
+                context_->PSSetShaderResources(8, 1, akfSrvs);
+                ID3D11ShaderResourceView* lutSrvs[] = {livePaintAssets.KuwaharaKernelLut()};
+                context_->PSSetShaderResources(9, 1, lutSrvs);
+
+                LivePaintParams akfParams = livePaint;
+                akfParams.skipInShaderBlur = 0;
+                LivePaintCBData akfCB = BuildLivePaintCB(akfParams, time);
+                akfCB.blurSourceTexelSizeX = 1.f / std::max(halfW, 1.f);
+                akfCB.blurSourceTexelSizeY = 1.f / std::max(viewportH, 1.f);
+
+                D3D11_MAPPED_SUBRESOURCE mapped{};
+                if (SUCCEEDED(context_->Map(materialCB_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+                    memcpy(mapped.pData, &blurMatCB, sizeof(blurMatCB));
+                    context_->Unmap(materialCB_.Get(), 0);
+                }
+                if (SUCCEEDED(context_->Map(livePaintCB_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+                    memcpy(mapped.pData, &akfCB, sizeof(akfCB));
+                    context_->Unmap(livePaintCB_.Get(), 0);
+                }
+                ID3D11Buffer* cbs[] = {frameCB_.Get(), objectCB_.Get(), materialCB_.Get(), livePaintCB_.Get()};
+                context_->VSSetConstantBuffers(0, 4, cbs);
+                context_->PSSetConstantBuffers(0, 4, cbs);
+                context_->Draw(3, 0);
+                };
+
+                context_->OMSetRenderTargets(1, rtv_.GetAddressOf(), dsv_.Get());
+                runAkfPass(rtv_.Get(), filteredSrv, viewportX + halfW);
+            }
+
+            ID3D11ShaderResourceView* nullSrvs[] = {nullptr, nullptr};
+            context_->PSSetShaderResources(8, 2, nullSrvs);
+            context_->PSSetShader(shaders.PixelShader(), nullptr, 0);
+            context_->VSSetShader(shaders.VertexShader(), nullptr, 0);
+            context_->IASetInputLayout(shaders.InputLayout());
+            context_->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
+            context_->IASetIndexBuffer(drawMesh.indexBuffer.Get(), DXGI_FORMAT_R32_UINT, 0);
+            context_->OMSetDepthStencilState(flatPreview ? depthDisabledState_.Get() : depthState_.Get(), 0);
+            context_->RSSetState(flatUvLayout ? rasterStateNoCull_.Get() : rasterState_.Get());
+        } else {
+            drawPass(viewportX + halfW, halfW, true, true, false, nullptr, nullptr);
+        }
     } else {
-        drawPass(viewportX, viewportW, false, livePaint.enabled);
+        const bool modifierForRender = materialParams.view.mode == ViewMode::Render && applyModifierToRender;
+        drawPass(viewportX, viewportW, modifierForRender, livePaint.enabled, false, nullptr, nullptr);
     }
 }
 

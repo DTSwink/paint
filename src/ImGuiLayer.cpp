@@ -111,6 +111,23 @@ ImGuiTabItemFlags TabSelectOnce(int tabIndex, int selectOnce) {
     return selectOnce == tabIndex ? ImGuiTabItemFlags_SetSelected : 0;
 }
 
+bool IsViewActive(const AppState& app, ViewMode mode, NormalViewSpace normalSpace = NormalViewSpace::Tangent) {
+    if (app.materialParams.view.mode != mode) return false;
+    if (mode != ViewMode::Normal) return true;
+    return app.materialParams.view.normalSpace == normalSpace;
+}
+
+bool ViewButton(const char* label, bool active) {
+    if (active) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.18f, 0.42f, 0.72f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.24f, 0.50f, 0.82f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.12f, 0.34f, 0.62f, 1.0f));
+    }
+    const bool clicked = ImGui::Button(label);
+    if (active) ImGui::PopStyleColor(3);
+    return clicked;
+}
+
 } // namespace
 
 void ImGuiLayer::DrawViewPanel(AppState& app) {
@@ -171,7 +188,7 @@ void ImGuiLayer::DrawViewPanel(AppState& app) {
 void ImGuiLayer::DrawAssetsPanel(AppState& app, GpuMesh& activeMesh, ID3D11Device* device) {
     ImGui::InputText("Scan Root", app.scanRootEdit, IM_ARRAYSIZE(app.scanRootEdit));
     app.scanRoot = app.scanRootEdit;
-    if (ImGui::Button("Rescan Berserk Assets")) app.requestRescan = true;
+    if (ImGui::Button("Rescan Assets")) app.requestRescan = true;
 
     ImGui::Separator();
     ImGui::Text("Material Sets (%d)", static_cast<int>(app.scanner.MaterialSets().size()));
@@ -192,7 +209,7 @@ void ImGuiLayer::DrawAssetsPanel(AppState& app, GpuMesh& activeMesh, ID3D11Devic
     ImGui::Separator();
     ImGui::Text("Meshes (%d)", static_cast<int>(app.scanner.MeshFiles().size()));
     ImGui::BeginChild("Meshes", ImVec2(0, 160), true);
-    if (ImGui::Selectable("Suzanne (Blender monkey)", app.meshKind == sv::PreviewMeshKind::Suzanne)) {
+    if (ImGui::Selectable("Suzanne", app.meshKind == sv::PreviewMeshKind::Suzanne)) {
         sv::LoadMeshFromPath(sv::ResolveSuzannePath(), sv::PreviewMeshKind::Suzanne, activeMesh, app, device);
     }
     const char* previewNames[] = {"Sphere", "Cube", "Plane"};
@@ -264,52 +281,45 @@ void ImGuiLayer::DrawMaterialPanel(AppState& app, ID3D11Device* device) {
 
 void ImGuiLayer::DrawLivePaintPanel(AppState& app) {
     auto& lp = app.livePaint;
-    ImGui::Checkbox("Apply to mesh shading", &lp.enabled);
-    ImGui::TextWrapped("Translates Blender Live Paint Filter node inputs into HLSL. Flat preview split compares original vs modified.");
+    ImGui::Checkbox("Enable modifier", &lp.enabled);
+    if (ImGui::Button("Reset Modifier Defaults")) {
+        lp = sv::LivePaintParams{};
+    }
+    ImGui::SliderFloat("Kuwahara Strength", &lp.kuwaharaStrength, 0.f, 1.f);
 
-    if (ImGui::CollapsingHeader("Painting Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::SliderFloat("Painting Thickness", &lp.paintingThickness, 0.01f, 1.f);
-        ImGui::SliderFloat("Padding", &lp.padding, 0.f, 1.f);
-        ImGui::Checkbox("Canvas", &lp.canvas);
-        ImGui::Checkbox("Holdout", &lp.holdout);
-        ImGui::Checkbox("Transparent Background", &lp.transparentBackground);
+    if (ImGui::CollapsingHeader("Blur Prepass", ImGuiTreeNodeFlags_DefaultOpen)) {
+        const char* noiseTypes[] = {"Off", "Box", "Gaussian", "Directional", "Cross", "Edge-aware"};
+        ImGui::Combo("Type", &lp.noiseType, noiseTypes, IM_ARRAYSIZE(noiseTypes));
+        if (lp.noiseType != 0) {
+            ImGui::SliderFloat("Blur Strength", &lp.noiseAmount, 0.f, 1.f);
+            ImGui::SliderFloat("Blur Radius", &lp.noiseScale, 0.f, 80.f);
+
+            if (lp.noiseType == 3) {
+                ImGui::SliderFloat("Angle", &lp.noiseAngle, -3.14159f, 3.14159f);
+                ImGui::SliderFloat("Directionality", &lp.noiseDirectionality, 1.f, 160.f);
+            } else if (lp.noiseType == 5) {
+                ImGui::SliderFloat("Edge Preserve", &lp.noiseContrast, 0.1f, 80.f);
+            }
+        }
     }
 
-    if (ImGui::CollapsingHeader("Stroke Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::DragFloat("Stroke Density", &lp.strokeDensity, 0.05f, 0.f, 10000.f);
-        ImGui::DragFloat("Min Stroke Scale", &lp.minStrokeScale, 0.01f, 0.f, 100.f);
-        ImGui::DragFloat("Max Stroke Scale", &lp.maxStrokeScale, 0.01f, 0.f, 100.f);
-        ImGui::DragFloat("Scale Threshold", &lp.scaleThreshold, 0.05f, 0.f, 100.f);
-        ImGui::SliderFloat("Min Stroke Opacity", &lp.minStrokeOpacity, 0.f, 1.f);
-        ImGui::SliderFloat("Max Stroke Opacity", &lp.maxStrokeOpacity, 0.f, 1.f);
-        ImGui::DragFloat("Opacity Threshold", &lp.opacityThreshold, 0.1f, 1.f, 100.f);
-        ImGui::Checkbox("Stack Direction", &lp.stackDirection);
-        ImGui::Checkbox("Broken Edges", &lp.brokenEdges);
-        ImGui::Checkbox("Random Seed Per Frame", &lp.randomSeedPerFrame);
-        ImGui::InputInt("Seed", &lp.seed);
+    if (ImGui::CollapsingHeader("Anisotropic Kuwahara", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::SliderFloat("Radius", &lp.kuwaharaRadius, 1.f, 8.f);
+        ImGui::SliderFloat("Sharpness", &lp.kuwaharaSharpness, 0.1f, 64.f);
+        ImGui::SliderFloat("Std Deviation", &lp.kuwaharaHardness, 0.25f, 4.f);
+        ImGui::SliderFloat("Alpha", &lp.kuwaharaEccentricity, 0.1f, 8.f);
     }
 
-    if (ImGui::CollapsingHeader("Shader Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::InputInt("Painter's Color Filter", &lp.paintersColorFilter);
-        ImGui::SliderFloat("Filter Strength", &lp.filterStrength, 0.f, 1.f);
-        ImGui::SliderFloat("Hue Variation", &lp.hueVariation, 0.f, 1.f);
-        ImGui::SliderFloat("Saturation Variation", &lp.saturationVariation, 0.f, 1.f);
-        ImGui::SliderFloat("Value Variation", &lp.valueVariation, 0.f, 1.f);
-        ImGui::SliderFloat("Bump Strength", &lp.bumpStrength, 0.f, 1.f);
-        ImGui::SliderFloat("Brush Grid", &lp.brushGrid, 1.f, 16.f);
-        ImGui::SliderFloat("Canvas Strength", &lp.canvasStrength, 0.f, 1.f);
-        ImGui::SliderFloat("Normal Scale", &lp.brushNormalScale, 0.f, 8.f);
-        ImGui::InputInt("Baking", &lp.baking);
-        lp.paintersColorFilter = std::clamp(lp.paintersColorFilter, 0, 9);
-        lp.baking = std::clamp(lp.baking, 0, 2);
-    }
+    lp.noiseType = std::clamp(lp.noiseType, 0, 5);
+    lp.noiseOctaves = std::clamp(lp.noiseOctaves, 1, 4);
+    lp.noiseAmount = std::clamp(lp.noiseAmount, 0.f, 1.f);
 }
 
 void ImGuiLayer::DrawShadersPanel(AppState& app) {
     ImGui::TextWrapped("Save HLSL files to live-apply shaders.");
     ImGui::TextWrapped("Watching: %ls", app.shaderRoot.c_str());
     ImGui::TextWrapped("Normal modifier: shaders/normal_modifier.hlsl");
-    ImGui::TextWrapped("Live paint core: shaders/live_paint_common.hlsl");
+    ImGui::TextWrapped("Modifier helper: shaders/modifier_common.hlsl");
     if (ImGui::Button("Reload Shaders Now")) app.requestShaderReload = true;
     if (ImGui::Button("Open Shader Folder")) {
         ShellExecuteW(nullptr, L"explore", app.shaderRoot.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
@@ -364,6 +374,50 @@ void ImGuiLayer::DrawViewportOverlay(const AppState& app) {
     dl->AddText(ImVec2(vpX + halfW + 10.f, vp->WorkPos.y + 10.f), IM_COL32(255, 255, 255, 230), "Modified");
 }
 
+void ImGuiLayer::DrawQuickViewControls(AppState& app) {
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove;
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x - 12.f, vp->WorkPos.y + 10.f),
+        ImGuiCond_Always, ImVec2(1.f, 0.f));
+    ImGui::SetNextWindowBgAlpha(0.78f);
+
+    if (!ImGui::Begin("##QuickViewControls", nullptr, flags)) {
+        ImGui::End();
+        return;
+    }
+
+    if (ViewButton("Render", IsViewActive(app, ViewMode::Render))) {
+        app.materialParams.view.mode = ViewMode::Render;
+        app.selectViewTabOnce = 0;
+    }
+    ImGui::SameLine();
+    if (ViewButton("World", IsViewActive(app, ViewMode::Normal, NormalViewSpace::World))) {
+        app.materialParams.view.mode = ViewMode::Normal;
+        app.materialParams.view.normalSpace = NormalViewSpace::World;
+        app.selectViewTabOnce = 1;
+    }
+    ImGui::SameLine();
+    if (ViewButton("Face", IsViewActive(app, ViewMode::Normal, NormalViewSpace::Geometry))) {
+        app.materialParams.view.mode = ViewMode::Normal;
+        app.materialParams.view.normalSpace = NormalViewSpace::Geometry;
+        app.selectViewTabOnce = 1;
+    }
+    ImGui::SameLine();
+    if (ViewButton("UV", IsViewActive(app, ViewMode::UV))) {
+        app.materialParams.view.mode = ViewMode::UV;
+        app.selectViewTabOnce = 2;
+    }
+
+    bool flatPreview = app.materialParams.view.presentation == ViewPresentation::Flat;
+    if (ImGui::Checkbox("Flat preview", &flatPreview)) {
+        app.materialParams.view.presentation = flatPreview ? ViewPresentation::Flat : ViewPresentation::Mesh;
+    }
+    ImGui::Checkbox("Apply modifier to render", &app.applyModifierToRender);
+    ImGui::End();
+}
+
 void ImGuiLayer::BuildUI(AppState& app, GpuMesh& activeMesh, ID3D11Device* device) {
     if (!BeginLeftSidebar("##Sidebar")) {
         return;
@@ -393,7 +447,7 @@ void ImGuiLayer::BuildUI(AppState& app, GpuMesh& activeMesh, ID3D11Device* devic
             DrawMaterialPanel(app, device);
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Live Paint", nullptr, TabSelectOnce(4, app.selectSidebarTabOnce))) {
+        if (ImGui::BeginTabItem("Modifier", nullptr, TabSelectOnce(4, app.selectSidebarTabOnce))) {
             app.activeSidebarTab = 4;
             DrawLivePaintPanel(app);
             ImGui::EndTabItem();
@@ -420,6 +474,7 @@ void ImGuiLayer::BuildUI(AppState& app, GpuMesh& activeMesh, ID3D11Device* devic
     }
 
     EndLeftSidebar();
+    DrawQuickViewControls(app);
     DrawViewportOverlay(app);
 }
 

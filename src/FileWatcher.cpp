@@ -67,8 +67,16 @@ void FileWatcher::WatchLoop() {
             }
         }
 
-        const DWORD wait = WaitForSingleObject(ov.hEvent, 200);
-        if (wait == WAIT_OBJECT_0) {
+        while (running_) {
+            const DWORD wait = WaitForSingleObject(ov.hEvent, 500);
+            if (wait == WAIT_TIMEOUT) {
+                continue;
+            }
+            if (wait != WAIT_OBJECT_0) {
+                running_ = false;
+                break;
+            }
+
             DWORD transferred = 0;
             if (GetOverlappedResult(dir, &ov, &transferred, FALSE)) {
                 pending_ = true;
@@ -76,6 +84,7 @@ void FileWatcher::WatchLoop() {
                     callback_();
                 }
             }
+            break;
         }
     }
 

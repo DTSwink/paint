@@ -1,21 +1,20 @@
 # Export Unreal Engine Texture2D assets to PNG for Shader Viewer
 #
 # Usage inside Unreal Editor:
-#   1. Open your project (e.g. Berserk)
+#   1. Open the Unreal project you want to inspect.
 #   2. Window -> Developer Tools -> Output Log
 #   3. Run: py "C:/Users/singerie/Documents/Cursor/temp/ShaderViewer/tools/ExportUnrealTextures.py"
 #
 # Or from command line (requires editor path):
-#   UnrealEditor-Cmd.exe "C:/Users/singerie/Documents/Cursor/Berserk/Berserk.uproject" \
+#   UnrealEditor-Cmd.exe "C:/Path/To/Project.uproject" \
 #     -ExecutePythonScript="C:/Users/singerie/Documents/Cursor/temp/ShaderViewer/tools/ExportUnrealTextures.py"
 #
-# Exports PNG files to:
-#   C:/Users/singerie/Documents/Cursor/Berserk/Saved/ShaderViewerExports
+# Set SHADER_VIEWER_EXPORT_ROOT to control the export folder.
 
 import os
 import unreal
 
-EXPORT_ROOT = r"C:\Users\singerie\Documents\Cursor\Berserk\Saved\ShaderViewerExports"
+EXPORT_ROOT = os.environ.get("SHADER_VIEWER_EXPORT_ROOT", os.path.abspath("ShaderViewerExports"))
 CONTENT_ROOT = "/Game"
 
 

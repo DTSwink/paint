@@ -26,6 +26,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 #include <iostream>
 #include <string>
 #include <shellapi.h>
+#include <thread>
 
 namespace {
 
@@ -47,6 +48,8 @@ bool g_running = true;
 bool g_rendererReady = false;
 std::wstring g_proofCapturePath;
 int g_proofFramesRemaining = -1;
+int g_startupWarmupFrames = 0;
+bool g_settingsLoaded = false;
 
 std::wstring ParseProofCapturePath() {
     int argc = 0;
@@ -61,6 +64,23 @@ std::wstring ParseProofCapturePath() {
     }
     LocalFree(argv);
     return path;
+}
+
+std::wstring ParsePrefixedArgument(const wchar_t* prefix) {
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!argv) return {};
+    std::wstring value;
+    const size_t prefixLen = wcslen(prefix);
+    for (int i = 1; i < argc; ++i) {
+        const std::wstring arg = argv[i];
+        if (arg.rfind(prefix, 0) == 0) {
+            value = arg.substr(prefixLen);
+            break;
+        }
+    }
+    LocalFree(argv);
+    return value;
 }
 
 std::filesystem::path GetExecutableDirectory() {
@@ -99,11 +119,52 @@ void QueueShaderReload() {
     g_shaderReloadAfter = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
 }
 
+void PumpPendingMessages() {
+    MSG msg{};
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+}
+
+bool InitializeShaders(const std::filesystem::path& shaderRoot) {
+    g_app.shaderRoot = shaderRoot.wstring();
+    g_app.shaders.SetShaderRoot(shaderRoot);
+    PumpPendingMessages();
+    if (g_app.shaders.TryLoadPrecompiled(g_renderer.Device())) {
+        if (!g_app.shaders.EnsurePostProcessShaders(g_renderer.Device())) {
+            std::wcerr << L"[ShaderViewer] Post-process shader compile failed: "
+                       << g_app.shaders.LastError().c_str() << std::endl;
+        }
+        g_app.statusMessage = L"Loaded precompiled shaders.";
+        return g_app.shaders.HasValidShaders();
+    }
+    PumpPendingMessages();
+    ReloadShaders(true);
+    return g_app.shaders.HasValidShaders();
+}
+
 void RescanAssets() {
     const std::wstring root(g_app.scanRoot.begin(), g_app.scanRoot.end());
     g_app.scanner.SetRoot(root);
     g_app.scanner.Rescan();
     g_app.statusMessage = L"Scan complete. Material sets: " + std::to_wstring(g_app.scanner.MaterialSets().size());
+}
+
+void FinishDeferredStartup(bool settingsLoaded) {
+    if (!g_app.scanRoot.empty()) {
+        RescanAssets();
+    } else if (!g_app.savedMaterialName.empty() || !g_app.savedMeshFile.empty()) {
+        RescanAssets();
+    }
+
+    if (settingsLoaded) {
+        g_app.requestApplySavedSettings = false;
+        sv::UserSettings::ApplySelection(g_app, g_activeMesh, g_renderer.Device());
+        g_app.statusMessage = L"Loaded settings from " + sv::UserSettings::DefaultPath().wstring();
+    } else {
+        sv::LoadDefaultMesh(g_activeMesh, g_app, g_renderer.Device());
+    }
 }
 
 void SetupProofState() {
@@ -133,20 +194,10 @@ void SetupProofState() {
     view.flatViewPanY = 0.5f;
     view.flatViewZoom = 0.66f;
 
-    g_app.livePaint.enabled = true;
-    g_app.livePaint.bumpStrength = 0.35f;
-    g_app.livePaint.brushNormalScale = 1.f;
-    g_app.livePaint.filterStrength = 0.95f;
-    g_app.livePaint.strokeDensity = 1.75f;
-    g_app.livePaint.minStrokeScale = 1.6f;
-    g_app.livePaint.maxStrokeScale = 3.75f;
-    g_app.livePaint.brushGrid = 8.f;
-    g_app.livePaint.minStrokeOpacity = 1.f;
-    g_app.livePaint.maxStrokeOpacity = 0.5f;
-    g_app.livePaint.opacityThreshold = 5.f;
-    g_app.livePaint.hueVariation = 0.12f;
-    g_app.livePaint.saturationVariation = 0.16f;
-    g_app.livePaint.valueVariation = 0.08f;
+    g_app.livePaint = sv::LivePaintParams{};
+    g_app.activeSidebarTab = 4;
+    g_app.selectSidebarTabOnce = 4;
+    sv::UserSettings::Load(g_app);
 }
 
 void ResetActiveMesh() {
@@ -305,6 +356,29 @@ bool CreateAppWindow(HINSTANCE instance) {
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int showCommand) {
     g_proofCapturePath = ParseProofCapturePath();
     const bool proofMode = !g_proofCapturePath.empty();
+    const std::wstring exportShadersPath = ParsePrefixedArgument(L"--export-shaders=");
+    if (!exportShadersPath.empty()) {
+        std::filesystem::path shaderRoot = ResolveShaderRoot();
+        const std::wstring shaderRootOverride = ParsePrefixedArgument(L"--shader-root=");
+        if (!shaderRootOverride.empty()) {
+            shaderRoot = shaderRootOverride;
+        }
+
+        if (!CreateAppWindow(hInstance)) return 1;
+        ShowWindow(g_hwnd, SW_HIDE);
+        if (!g_renderer.Initialize(g_hwnd, g_width, g_height)) return 1;
+
+        g_app.shaders.SetShaderRoot(shaderRoot);
+        if (!g_app.shaders.CompileAll(g_renderer.Device())) {
+            std::cerr << "Shader export failed: " << g_app.shaders.LastError() << std::endl;
+            return 1;
+        }
+        if (!g_app.shaders.ExportPrecompiled(std::filesystem::path(exportShadersPath))) {
+            std::cerr << "Shader export failed: could not write .cso files." << std::endl;
+            return 1;
+        }
+        return 0;
+    }
 
     if (!CreateAppWindow(hInstance)) return 1;
 
@@ -314,41 +388,60 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int showCommand) {
 
     ShowWindow(g_hwnd, showCommand);
     UpdateWindow(g_hwnd);
+    PumpPendingMessages();
 
     g_app.camera.SetAspect(RenderViewportAspect());
     g_app.material.SetDevice(g_renderer.Device());
     g_app.livePaintAssets.Initialize(g_renderer.Device());
-    sv::LoadDefaultMesh(g_activeMesh, g_app, g_renderer.Device());
+    sv::LoadStartupMesh(g_activeMesh, g_app, g_renderer.Device());
     NormalizeLightDirection();
 
-    const auto shaderRoot = ResolveShaderRoot();
-    g_app.shaderRoot = shaderRoot.wstring();
-    g_app.shaders.SetShaderRoot(shaderRoot);
-    ReloadShaders(true);
+    if (!InitializeShaders(ResolveShaderRoot())) return 1;
+    PumpPendingMessages();
 
     if (proofMode) {
         SetupProofState();
         g_proofFramesRemaining = 20;
     } else {
-        g_shaderWatcher.Start(shaderRoot, [] {});
+        g_shaderWatcher.Start(ResolveShaderRoot(), [] {});
         const auto buildShaders = GetExecutableDirectory() / L"shaders";
+        const auto shaderRoot = ResolveShaderRoot();
         if (buildShaders != shaderRoot && std::filesystem::exists(buildShaders)) {
             g_shaderWatcherBuild.Start(buildShaders, [] {});
         }
 
         g_app.scanner.AddScanRoot(sv::ResolveAssetsRoot().wstring());
-
-        if (sv::UserSettings::Load(g_app)) {
+        g_settingsLoaded = sv::UserSettings::Load(g_app);
+        if (g_settingsLoaded) {
             g_app.requestApplySavedSettings = true;
         }
+        g_app.requestDeferredStartup = true;
+        g_startupWarmupFrames = 8;
     }
 
     auto lastTime = std::chrono::steady_clock::now();
     MSG msg{};
     while (g_running) {
+        const auto frameStart = std::chrono::steady_clock::now();
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
+        }
+
+        const bool foreground = GetForegroundWindow() == g_hwnd && !IsIconic(g_hwnd);
+        const bool startupWarmup = g_startupWarmupFrames > 0;
+        if (!proofMode && !foreground && !startupWarmup) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            continue;
+        }
+        if (startupWarmup) {
+            --g_startupWarmupFrames;
+        }
+
+        if (g_app.requestDeferredStartup) {
+            g_app.requestDeferredStartup = false;
+            FinishDeferredStartup(g_settingsLoaded);
+            PumpPendingMessages();
         }
 
         if (g_app.requestRescan) {
@@ -387,6 +480,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int showCommand) {
 
         g_renderer.BeginFrame();
 
+        g_imgui.NewFrame();
+        g_imgui.BuildUI(g_app, g_activeMesh, g_renderer.Device());
+
         const DirectX::XMFLOAT3 lightDir = g_app.cameraRelativeLight
             ? g_app.camera.ComputeKeyLightDirection(g_app.lightPitchOffset, g_app.lightSideOffset)
             : g_app.lightDirection;
@@ -396,10 +492,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int showCommand) {
             g_app.lightColor, g_app.exposure, g_app.ambientIntensity, g_app.lightWrap,
             g_app.scatterStrength, g_app.material, g_app.materialParams,
             g_app.livePaint, g_app.livePaintAssets,
-            g_activeMesh, g_app.shaders);
+            g_activeMesh, g_app.shaders, g_app.applyModifierToRender);
 
-        g_imgui.NewFrame();
-        g_imgui.BuildUI(g_app, g_activeMesh, g_renderer.Device());
         g_imgui.Render(g_renderer.Context());
         g_renderer.Present();
 
@@ -413,6 +507,17 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int showCommand) {
                     return 2;
                 }
                 g_running = false;
+            }
+        }
+
+        if (!proofMode && g_running) {
+            const bool dragging = g_app.orbitDragging || g_app.panDragging;
+            const auto kTargetFrameTime = (!foreground && !startupWarmup)
+                ? std::chrono::milliseconds(200)
+                : (dragging ? std::chrono::milliseconds(33) : std::chrono::milliseconds(66));
+            const auto elapsed = std::chrono::steady_clock::now() - frameStart;
+            if (elapsed < kTargetFrameTime) {
+                std::this_thread::sleep_for(kTargetFrameTime - elapsed);
             }
         }
     }
