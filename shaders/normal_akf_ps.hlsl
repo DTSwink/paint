@@ -44,7 +44,7 @@ cbuffer LivePaintCB : register(b3)
     float AKFSharpness;
     float AKFHardness;
     float AKFEccentricity;
-    float AKFAnisotropy;
+    int AKFPasses;
     int NoiseType;
     float NoiseAmount;
     float NoiseScale;
@@ -92,5 +92,5 @@ float4 PSMain(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_TARGET
         alpha,
         sharpness);
 
-    return float4(lerp(center, filtered, saturate(AKFStrength)), 1.0);
+    return float4(filtered, 1.0);
 }

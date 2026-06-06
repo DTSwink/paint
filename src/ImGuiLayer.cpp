@@ -282,12 +282,25 @@ void ImGuiLayer::DrawMaterialPanel(AppState& app, ID3D11Device* device) {
 void ImGuiLayer::DrawLivePaintPanel(AppState& app) {
     auto& lp = app.livePaint;
     ImGui::Checkbox("Enable modifier", &lp.enabled);
-    if (ImGui::Button("Reset Modifier Defaults")) {
-        lp = sv::LivePaintParams{};
-    }
-    ImGui::SliderFloat("Kuwahara Strength", &lp.kuwaharaStrength, 0.f, 1.f);
 
-    if (ImGui::CollapsingHeader("Blur Prepass", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Anisotropic Kuwahara (itworks)", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Checkbox("Enable Kuwahara", &lp.enabled);
+        if (ImGui::Button("Reset itworks preset")) {
+            lp.kuwaharaRadius = 5.f;
+            lp.kuwaharaSharpness = 8.f;
+            lp.kuwaharaEccentricity = 1.f;
+            lp.kuwaharaHardness = 2.f;
+            lp.kuwaharaPasses = 2;
+            lp.kuwaharaStrength = 1.f;
+        }
+        ImGui::SliderFloat("Kernel radius", &lp.kuwaharaRadius, 1.f, 16.f);
+        ImGui::SliderFloat("Sharpness", &lp.kuwaharaSharpness, 0.5f, 32.f);
+        ImGui::SliderFloat("Alpha", &lp.kuwaharaEccentricity, 0.1f, 4.f);
+        ImGui::SliderFloat("Tensor sigma", &lp.kuwaharaHardness, 0.25f, 4.f);
+        ImGui::SliderInt("Passes", &lp.kuwaharaPasses, 1, 4);
+    }
+
+    if (ImGui::CollapsingHeader("Blur Prepass (optional)", ImGuiTreeNodeFlags_None)) {
         const char* noiseTypes[] = {"Off", "Box", "Gaussian", "Directional", "Cross", "Edge-aware"};
         ImGui::Combo("Type", &lp.noiseType, noiseTypes, IM_ARRAYSIZE(noiseTypes));
         if (lp.noiseType != 0) {
@@ -303,14 +316,8 @@ void ImGuiLayer::DrawLivePaintPanel(AppState& app) {
         }
     }
 
-    if (ImGui::CollapsingHeader("Anisotropic Kuwahara", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::SliderFloat("Radius", &lp.kuwaharaRadius, 1.f, 8.f);
-        ImGui::SliderFloat("Sharpness", &lp.kuwaharaSharpness, 0.1f, 64.f);
-        ImGui::SliderFloat("Std Deviation", &lp.kuwaharaHardness, 0.25f, 4.f);
-        ImGui::SliderFloat("Alpha", &lp.kuwaharaEccentricity, 0.1f, 8.f);
-    }
-
-    lp.noiseType = std::clamp(lp.noiseType, 0, 5);
+    lp.kuwaharaPasses = std::clamp(lp.kuwaharaPasses, 1, 4);
+    lp.kuwaharaStrength = lp.enabled ? 1.f : 0.f;
     lp.noiseOctaves = std::clamp(lp.noiseOctaves, 1, 4);
     lp.noiseAmount = std::clamp(lp.noiseAmount, 0.f, 1.f);
 }

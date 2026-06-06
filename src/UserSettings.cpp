@@ -174,7 +174,8 @@ void ApplyKey(AppState& app, const std::string& key, const std::string& value) {
         app.livePaint.kuwaharaHardness = v;
     }
     else if (key == "akfEccentricity") app.livePaint.kuwaharaEccentricity = ParseFloat(value, app.livePaint.kuwaharaEccentricity);
-    else if (key == "akfAnisotropy") app.livePaint.kuwaharaAnisotropy = ParseFloat(value, app.livePaint.kuwaharaAnisotropy);
+    else if (key == "akfPasses") app.livePaint.kuwaharaPasses = std::clamp(ParseInt(value, app.livePaint.kuwaharaPasses), 1, 4);
+    else if (key == "akfAnisotropy") { /* legacy */ }
     else if (key == "noiseType") app.livePaint.noiseType = ParseInt(value, app.livePaint.noiseType);
     else if (key == "noiseAmount") {
         app.livePaint.noiseAmount = ParseFloat(value, app.livePaint.noiseAmount);
@@ -347,7 +348,7 @@ bool UserSettings::Save(const AppState& app) {
     out << "akfSharpness=" << lp.kuwaharaSharpness << '\n';
     out << "akfHardness=" << lp.kuwaharaHardness << '\n';
     out << "akfEccentricity=" << lp.kuwaharaEccentricity << '\n';
-    out << "akfAnisotropy=" << lp.kuwaharaAnisotropy << '\n';
+    out << "akfPasses=" << lp.kuwaharaPasses << '\n';
     out << "noiseType=" << lp.noiseType << '\n';
     out << "noiseAmount=" << lp.noiseAmount << '\n';
     out << "noiseScale=" << lp.noiseScale << '\n';

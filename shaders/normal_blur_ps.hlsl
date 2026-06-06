@@ -44,7 +44,7 @@ cbuffer LivePaintCB : register(b3)
     float AKFSharpness;
     float AKFHardness;
     float AKFEccentricity;
-    float AKFAnisotropy;
+    int AKFPasses;
     int NoiseType;
     float NoiseAmount;
     float NoiseScale;

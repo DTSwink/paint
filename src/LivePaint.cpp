@@ -1,5 +1,7 @@
 #include "LivePaint.h"
 
+#include <algorithm>
+
 namespace sv {
 
 LivePaintCBData BuildLivePaintCB(const LivePaintParams& params, float time) {
@@ -46,7 +48,7 @@ LivePaintCBData BuildLivePaintCB(const LivePaintParams& params, float time) {
     cb.kuwaharaSharpness = params.kuwaharaSharpness;
     cb.kuwaharaHardness = params.kuwaharaHardness;
     cb.kuwaharaEccentricity = params.kuwaharaEccentricity;
-    cb.kuwaharaAnisotropy = params.kuwaharaAnisotropy;
+    cb.kuwaharaPasses = std::clamp(params.kuwaharaPasses, 1, 4);
     cb.noiseType = params.noiseType;
     cb.noiseAmount = params.noiseAmount;
     cb.noiseScale = params.noiseScale;

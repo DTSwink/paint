@@ -50,7 +50,7 @@ cbuffer LivePaintCB : register(b3)
     float AKFSharpness;
     float AKFHardness;
     float AKFEccentricity;
-    float AKFAnisotropy;
+    int AKFPasses;
     int NoiseType;
     float NoiseAmount;
     float NoiseScale;
@@ -446,12 +446,7 @@ float3 PaintNormalViewColor(float3 baseColor, float2 uv, float3 worldPos, float3
         return sourceColor;
 
     float3 blurred = blurModifierSource(sourceColor, centerDx, centerDy, uv, 0.0, tangent, bitangent, geometryNormal);
-
-    if (AKFStrength <= 0.0)
-        return blurred;
-
-    const float3 filtered = modifierKuwaharaFilter(blurred, uv, tangent, bitangent, geometryNormal);
-    return lerp(blurred, saturate(filtered), saturate(AKFStrength));
+    return blurred;
 }
 
 float3 PerturbNormalWithBrush(float3 normal, float3 tangent, float3 bitangent, float2 uv, float3 worldPos)

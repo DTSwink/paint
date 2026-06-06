@@ -1,8 +1,9 @@
 #ifndef KUWAHARA_COMMON_HLSL
 #define KUWAHARA_COMMON_HLSL
 
+// BrushStrokeTest / Shadertoy DtKczW / testcode.txt (itworks preset)
 static const float KU_EPSILON = 1e-4;
-static const int KU_MAX_RADIUS = 8;
+static const int KU_MAX_RADIUS = 16;
 static const int KU_SECTORS = 8;
 
 float kuwGaussian(float sigma, float pos)
@@ -72,61 +73,43 @@ float4 kuwComputeEigenVector(
     return float4(t, phi, anisotropy);
 }
 
-float3 kuwCombineSectors(float4 moments[KU_SECTORS], float3 s[KU_SECTORS], float sharpness, float3 fallback)
+float2 kuwLutUv(float2 srOffset)
 {
-    float4 output = 0.0;
-    [unroll]
-    for (int k = 0; k < KU_SECTORS; ++k)
-    {
-        if (moments[k].w <= KU_EPSILON)
-            continue;
-
-        const float3 mean = moments[k].xyz / moments[k].w;
-        const float3 variance = abs(s[k] / moments[k].w - mean * mean);
-        const float sigma2 = sqrt(variance.r) + sqrt(variance.g) + sqrt(variance.b);
-        const float w = 1.0 / (1.0 + pow(255.0 * sigma2, max(sharpness, 1e-3)));
-
-        output.xyz += mean * w;
-        output.w += w;
-    }
-
-    if (output.w <= KU_EPSILON)
-        return fallback;
-    return output.xyz / output.w;
+    return clamp(float2(0.5, 0.5) + srOffset, float2(0.001, 0.001), float2(0.999, 0.999));
 }
 
 void kuwAccumulateAtOffset(
     inout float4 moments[KU_SECTORS], inout float3 s[KU_SECTORS],
     Texture2D source, SamplerState sourceSampler, Texture2D lut, SamplerState lutSampler,
-    float2 uv, float2 texelOffset, float2 v)
+    float2 uv, float2 texelOffset, float2 srOffset)
 {
-    const float3 colour0 = source.SampleLevel(sourceSampler, uv + texelOffset, 0).xyz;
-    const float3 colour1 = source.SampleLevel(sourceSampler, uv - texelOffset, 0).xyz;
-    const float3 colour0Sqr = colour0 * colour0;
-    const float3 colour1Sqr = colour1 * colour1;
+    const float3 c0 = source.SampleLevel(sourceSampler, uv + texelOffset, 0).xyz;
+    const float3 c1 = source.SampleLevel(sourceSampler, uv - texelOffset, 0).xyz;
+    const float3 c0s = c0 * c0;
+    const float3 c1s = c1 * c1;
 
-    const float4 w0123 = lut.Sample(lutSampler, float2(0.5, 0.5) + v);
+    const float4 w0123 = lut.Sample(lutSampler, kuwLutUv(srOffset));
+    const float4 w4567 = lut.Sample(lutSampler, kuwLutUv(-srOffset));
+
     [unroll]
     for (int k = 0; k < 4; ++k)
     {
-        moments[k] += float4(colour0 * w0123[k], w0123[k]);
-        s[k] += colour0Sqr * w0123[k];
-        moments[k + 4] += float4(colour1 * w0123[k], w0123[k]);
-        s[k + 4] += colour1Sqr * w0123[k];
+        moments[k] += float4(c0 * w0123[k], w0123[k]);
+        s[k] += c0s * w0123[k];
+        moments[k + 4] += float4(c1 * w0123[k], w0123[k]);
+        s[k + 4] += c1s * w0123[k];
     }
-
-    const float4 w4567 = lut.Sample(lutSampler, float2(0.5, 0.5) - v);
     [unroll]
-    for (int k = 4; k < KU_SECTORS; ++k)
+    for (int i = 4; i < 8; ++i)
     {
-        moments[k] += float4(colour0 * w4567[k - 4], w4567[k - 4]);
-        s[k] += colour0Sqr * w4567[k - 4];
+        moments[i] += float4(c0 * w4567[i - 4], w4567[i - 4]);
+        s[i] += c0s * w4567[i - 4];
     }
     [unroll]
     for (int j = 0; j < 4; ++j)
     {
-        moments[j] += float4(colour1 * w4567[j], w4567[j]);
-        s[j] += colour1Sqr * w4567[j];
+        moments[j] += float4(c1 * w4567[j], w4567[j]);
+        s[j] += c1s * w4567[j];
     }
 }
 
@@ -144,21 +127,15 @@ float3 kuwComputeKuwaharaFilter(
 {
     const float3 center = source.SampleLevel(sourceSampler, uv, 0).xyz;
     const float4 eigen = kuwComputeEigenVector(source, sourceSampler, uv, rcpSize, kernelRadius, stdDeviation);
+    const float krF = max(float(kernelRadius), 1.0);
 
-    const float radius = max(float(kernelRadius), 1.0);
-    const float a = radius * clamp((alpha + eigen.w) / max(alpha, KU_EPSILON), 0.1, 2.0);
-    const float b = radius * clamp(alpha / max(alpha + eigen.w, KU_EPSILON), 0.1, 2.0);
-
+    const float2x2 S = float2x2(
+        alpha / max(alpha + eigen.w, KU_EPSILON), 0.0,
+        0.0, (alpha + eigen.w) / max(alpha, KU_EPSILON));
     const float cosPhi = cos(eigen.z);
     const float sinPhi = sin(eigen.z);
     const float2x2 R = float2x2(cosPhi, -sinPhi, sinPhi, cosPhi);
-    const float2x2 S = float2x2(0.5 / max(a, KU_EPSILON), 0.0, 0.0, 0.5 / max(b, KU_EPSILON));
     const float2x2 SR = mul(S, R);
-
-    const float cosPhiAbs = abs(cosPhi);
-    const float sinPhiAbs = abs(sinPhi);
-    const int maxX = min(KU_MAX_RADIUS, max(1, int(ceil(sqrt(a * a * cosPhiAbs * cosPhiAbs + b * b * sinPhiAbs * sinPhiAbs)))));
-    const int maxY = min(KU_MAX_RADIUS, max(1, int(ceil(sqrt(a * a * sinPhiAbs * sinPhiAbs + b * b * cosPhiAbs * cosPhiAbs)))));
 
     float4 moments[KU_SECTORS];
     float3 sectorVariance[KU_SECTORS];
@@ -180,25 +157,44 @@ float3 kuwComputeKuwaharaFilter(
     }
 
     [loop]
-    for (int y = 0; y <= maxY; ++y)
+    for (int y = -KU_MAX_RADIUS; y <= KU_MAX_RADIUS; ++y)
     {
         [loop]
-        for (int x = -maxX; x <= maxX; ++x)
+        for (int x = -KU_MAX_RADIUS; x <= KU_MAX_RADIUS; ++x)
         {
-            if (y != 0 || x > 0)
-            {
-                const float2 v = mul(SR, float2(x, y));
-                if (dot(v, v) <= 0.25)
-                {
-                    kuwAccumulateAtOffset(
-                        moments, sectorVariance, source, sourceSampler, lut, lutSampler,
-                        uv, float2(x, y) * rcpSize, v);
-                }
-            }
+            if (abs(x) > kernelRadius || abs(y) > kernelRadius)
+                continue;
+
+            const float2 offset = float2(x, y);
+            if (dot(offset / krF, offset / krF) > 0.25)
+                continue;
+
+            const float2 sr = mul(SR, offset / krF);
+            kuwAccumulateAtOffset(
+                moments, sectorVariance, source, sourceSampler, lut, lutSampler,
+                uv, offset * rcpSize, sr);
         }
     }
 
-    return kuwCombineSectors(moments, sectorVariance, sharpness, center);
+    float4 result = 0.0;
+    const float q = max(sharpness, 0.001);
+    [unroll]
+    for (int k = 0; k < KU_SECTORS; ++k)
+    {
+        if (moments[k].w <= KU_EPSILON)
+            continue;
+
+        const float3 mean = moments[k].rgb / moments[k].w;
+        const float3 variance = abs(sectorVariance[k] / moments[k].w - mean * mean);
+        const float si = sqrt(dot(variance, variance));
+        const float w = 1.0 / (1.0 + pow(255.0 * si, q));
+        result.xyz += mean * w;
+        result.w += w;
+    }
+
+    if (result.w <= KU_EPSILON)
+        return center;
+    return result.xyz / result.w;
 }
 
 #endif
